@@ -1,7 +1,7 @@
 /*
  * This file is part of the flashrom project.
  *
- * Copyright (C) 2009 Uwe Hermann <uwe@hermann-uwe.de>
+ * Copyright (C) 2015 Joseph C. Lehner <joseph.c.lehner@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -115,9 +115,6 @@ int atapromise_init(void)
 
 	OUTB(1, io_base_addr + 0x10);
 
-	pci_write_word(dev, 0x30, 0xc0000);
-	pci_write_word(dev, 0x32, 3);
-
 	register_par_master(&par_master_atapromise, BUS_PARALLEL);
 
 	return 0;
@@ -130,64 +127,54 @@ static chipaddr last_write_addr = 0;
 static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 				chipaddr addr)
 {
-	uint32_t iaddr = (uint32_t)addr;
+	uint32_t data = 0;
 
-	switch (silicon_id_cmd_byte) {
-	case 0:
-		silicon_id_cmd_byte += (iaddr == 0x555 && val == 0xaa);
-		break;
-	case 1:
-		silicon_id_cmd_byte += (iaddr == 0x2aa && val == 0x55);
-		break;
-	case 2:
-		silicon_id_cmd_byte += (iaddr == 0x555 && val == 0x90);
-		break;
-	default:
-		silicon_id_cmd_byte = 0;
+	if (true || addr - last_write_addr != 1) {
+		data = (addr << 8) | val;
+	} else {
+		/* ----------------------------
+		 *             EAX
+		 * ----------------------------
+		 *              |      AX
+		 * ----------------------------
+		 *              |  AH   |  AL
+		 * ----------------------------
+		 *
+		 * EAX := ?constant?
+		 * AX := addr
+		 * EAX <<= 8
+		 * AL := data
+		 */
+
+		union {
+			struct {
+				uint8_t al, ah, _eax[2];
+			} b;
+			struct {
+				uint16_t ax, _eax;
+			} w;
+			struct {
+				uint32_t eax;
+			} l;
+		} xax;
+
+		xax.l.eax = 0;
+
+		xax.w.ax = 16384 * 1;
+		xax.l.eax &= 0x0000ffff;
+		xax.l.eax += addr;
+		xax.l.eax <<= 8;
+		xax.b.al = val;
+
+		data = xax.l.eax;
 	}
 
-	/* ----------------------------
-	 *             EAX
-	 * ----------------------------
-	 *              |      AX
-	 * ----------------------------
-	 *              |  AH   |  AL    
-	 * ----------------------------
-	 *
-	 * EAX := ?constant?
-	 * AX := addr
-	 * EAX <<= 8
-	 * AL := data
-	 */
-
-	union {
-		struct {
-			uint8_t al, ah, _eax[2];
-		} b;
-		struct {
-			uint16_t ax, _eax;
-		} w;
-		struct {
-			uint32_t eax;
-		} l;
-	} xax;
-
-	xax.l.eax = 0;
-
-	xax.w.ax = 16384 * 1;
-	xax.l.eax &= 0x0000ffff;
-	xax.l.eax += rom_base_addr + (uint32_t)addr;
-	xax.l.eax <<= 8;
-	xax.b.al = val;
-
-	uint32_t data = addr;
-	data <<= 8;
-	data |= val;
 
 	//if (iaddr == 0x555 || iaddr == 0x2aa)
 	//	printf("writeb: %04x := %02x (out=%08x)\n", (unsigned)addr, val, data);
 
 	OUTL(data, io_base_addr + bios_rom_addr);
+	last_write_addr = addr;
 }
 
 static uint8_t atapromise_chip_readb(const struct flashctx *flash,
