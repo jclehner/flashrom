@@ -49,7 +49,7 @@ static uint32_t rom_base_addr = 0;
 
 static uint32_t bios_rom_addr_data = 0;
 
-static void *phys = NULL;
+static uint8_t *phys = NULL;
 static size_t maplen = 0;
 
 const struct dev_entry ata_promise[] = {
@@ -124,7 +124,7 @@ int atapromise_init(void)
 	msg_pdbg("ROM size is %zu kB (reg=0x%08" PRIx32 ")\n", maplen, romaddr);
 
 	maplen *= 1024;
-	phys = physmap_ro("Promise BIOS", rom_base_addr, maplen);
+	phys = (uint8_t*)physmap("Promise BIOS", rom_base_addr, maplen);
 	if (phys == ERROR_PTR) {
 		return 1;
 	}
@@ -143,6 +143,7 @@ int atapromise_init(void)
 		return 1;
 	}
 
+	max_rom_decode.parallel = 128 * 1024;
 	register_par_master(&par_master_atapromise, BUS_PARALLEL);
 
 	return 0;
@@ -152,10 +153,10 @@ int atapromise_init(void)
 static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 				chipaddr addr)
 {
-	uint32_t base = 0;
-	uint32_t offset = 0;
+	uint32_t data = addr << 8 | val;
+	bool wait = false;
 
-#if 0
+#if 1
 	static unsigned int program_cmd_idx = 0;
 
 	switch (program_cmd_idx) {
@@ -169,23 +170,45 @@ static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 		program_cmd_idx += (addr == 0x555 && val == 0xa0) ? 1 : 0;
 		break;
 	case 3:
-		offset = 0;
-		base = rom_base_addr;
+		// 0x4000 --> first 2 bytes, every 8 bytes
+		// 0x8000 --> first byte, every 4 bytes
+
+		// this writes the first 8 bytes of every 16 bytes 
+		//data |= (rom_base_addr + (uint32_t)addr / 0x1000) << 8;
+		// this writes the first 2 bytes of every 16 bytes
+		data |= (rom_base_addr + (uint32_t)addr / 0x1000) << 8;
+		//data |= (rom_base_addr + (((uint32_t)addr / 0x10000) & 0xfffff)) << 8;
+		//data |= rom_base_addr << 8;
+		//data &= 0xffff00ff;
+
+		wait = true;
+#if 0
+		msg_pdbg("data: %05x := %02x (%08x)\n", (unsigned)addr & 0xfffff,
+				val & 0xff, (unsigned)data);
+#endif
 		/* fall through */
 	default:
 		program_cmd_idx = 0;
 	}
 #endif
 
-	uint32_t data = ((offset & 0xffff) + base + addr) << 8 | val;
-
 	OUTL(data, io_base_addr + bios_rom_addr_data);
+
+	//programmer_delay(10);
+
+	(void) wait;
+#if 1
+	if (wait) {
+		mmio_writeb(val, phys + addr);
+	}
+#endif
 }
 
 static uint8_t atapromise_chip_readb(const struct flashctx *flash,
 				  const chipaddr addr)
 {
-	return ((volatile uint8_t*)phys)[addr];
+	return mmio_readb(phys + addr);
+	//return ((volatile uint8_t*)phys)[addr];
 }
 
 #else
