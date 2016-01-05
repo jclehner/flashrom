@@ -217,6 +217,11 @@ UNSUPPORTED_FEATURES += CONFIG_ATAVIA=yes
 else
 override CONFIG_ATAVIA = no
 endif
+ifeq ($(CONFIG_ATAPROMISE), yes)
+UNSUPPORTED_FEATURES += CONFIG_ATAPROMISE=yes
+else
+override CONFIG_ATAPROMISE = no
+endif
 ifeq ($(CONFIG_IT8212), yes)
 UNSUPPORTED_FEATURES += CONFIG_IT8212=yes
 else
@@ -439,6 +444,9 @@ CONFIG_ATAHPT ?= no
 # VIA VT6421A LPC memory support
 CONFIG_ATAVIA ?= yes
 
+# Promise ATA controller support.
+CONFIG_ATAPROMISE ?= yes
+
 # Always enable FT2232 SPI dongles for now.
 CONFIG_FT2232_SPI ?= yes
 
@@ -613,6 +621,12 @@ endif
 ifeq ($(CONFIG_ATAVIA), yes)
 FEATURE_CFLAGS += -D'CONFIG_ATAVIA=1'
 PROGRAMMER_OBJS += atavia.o
+NEED_PCI := yes
+endif
+
+ifeq ($(CONFIG_ATAPROMISE), yes)
+FEATURE_CFLAGS += -D'CONFIG_ATAPROMISE=1'
+PROGRAMMER_OBJS += atapromise.o
 NEED_PCI := yes
 endif
 
