@@ -33,14 +33,27 @@
 
 #define PCI_VENDOR_ID_PROMISE	0x105a
 
+/**
+ * This programmer was created by reverse-engineering Promise's DOS-only
+ * PTIFLASH utility (v1.45.0.1), as no public documentation on any of 
+ * these chips exists.
+ *
+ * The only device tested is a PDC20267 controller, but the logic for
+ * programming the other 2026x controllers is the same, so it should,
+ * in theory, work for those as well.
+ */
+
 static uint32_t io_base_addr = 0;
 static uint32_t rom_base_addr = 0;
+//static uint32_t rom_addr = 0;
 
 static uint32_t bios_rom_addr = 0;
 static uint32_t bios_rom_data = 0;
 
 static void *phys = NULL;
 static size_t maplen = 0;
+
+static unsigned w_offset = 0;
 
 const struct dev_entry ata_promise[] = {
 	{0x105a, 0x4d38, NT, "Promise", "PDC20262 (FastTrak66/Ultra66)"},
@@ -58,16 +71,14 @@ static const struct par_master par_master_atapromise = {
 		.chip_readw		= fallback_chip_readw,
 		.chip_readl		= fallback_chip_readl,
 		.chip_readn		= fallback_chip_readn,
-		.chip_writeb		= atapromise_chip_writeb,
-		.chip_writew		= fallback_chip_writew,
-		.chip_writel		= fallback_chip_writel,
-		.chip_writen		= fallback_chip_writen,
+		.chip_writeb	= atapromise_chip_writeb,
+		.chip_writew	= fallback_chip_writew,
+		.chip_writel	= fallback_chip_writel,
+		.chip_writen	= fallback_chip_writen,
 };
 
 static int atapromise_shutdown(void *data)
 {
-	printf("\n%s\n", __func__);
-
 	if (phys) {
 		physunmap(phys, maplen);
 		phys = NULL;
@@ -89,21 +100,39 @@ int atapromise_init(void)
 		return 1;
 
 	io_base_addr = pcidev_readbar(dev, PCI_BASE_ADDRESS_4) & 0xfffe;
-	if (!io_base_addr)
+	if (!io_base_addr) {
+		msg_pdbg("Failed to read BAR4");
 		return 1;
+	}
+
+	/* not exactly sure what this does, but ptiflash does it too */
+	OUTB(1, io_base_addr + 0x10);
 
 	rom_base_addr = pcidev_readbar(dev, PCI_BASE_ADDRESS_5);
-	if (!rom_base_addr)
+	if (!rom_base_addr) {
+		msg_pdbg("Failed to read BAR5\n");
 		return 1;
+	}
 
-	if (register_shutdown(atapromise_shutdown, NULL))
-		return 1;
+	/* this is also borrowed from ptiflash */
+	rpci_write_long(dev, PCI_ROM_ADDRESS, 0x0003c000);
+	uint32_t romaddr = pci_read_long(dev, PCI_ROM_ADDRESS);
+	if (romaddr & 0xc000) {
+		maplen = 16;
+	} else {
+		maplen = romaddr & 0x10000 ? 128 : 64;
+	}
 
-	maplen = dev->rom_size;
-	phys = physmap_ro("ROM", rom_base_addr, maplen);
+	msg_pdbg("ROM size is %zu kB (reg=0x%08x)\n", maplen, (unsigned)romaddr);
+
+	maplen *= 1024;
+	phys = physmap_ro("Promise BIOS", rom_base_addr, maplen);
 	if (phys == ERROR_PTR) {
 		return 1;
 	}
+
+	if (register_shutdown(atapromise_shutdown, NULL))
+		return 1;
 
 	switch (dev->device_id) {
 	case 0x4d30:
@@ -117,72 +146,46 @@ int atapromise_init(void)
 		return 1;
 	}
 
-	OUTB(1, io_base_addr + 0x10);
-
 	register_par_master(&par_master_atapromise, BUS_PARALLEL);
 
 	return 0;
 }
 
-static chipaddr last_write_addr = 0;
+static unsigned program_cmd_idx = 0;
 
 static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 				chipaddr addr)
 {
-	uint32_t data = 0;
+	uint32_t base = 0;
+	uint32_t offset = 0;
 
-	if (true || addr - last_write_addr != 1) {
-		data = (addr << 8) | val;
-	} else {
-		/* ----------------------------
-		 *             EAX
-		 * ----------------------------
-		 *              |      AX
-		 * ----------------------------
-		 *              |  AH   |  AL
-		 * ----------------------------
-		 *
-		 * EAX := ?constant?
-		 * AX := addr
-		 * EAX <<= 8
-		 * AL := data
-		 */
-
-		union {
-			struct {
-				uint8_t al, ah, _eax[2];
-			} b;
-			struct {
-				uint16_t ax, _eax;
-			} w;
-			struct {
-				uint32_t eax;
-			} l;
-		} xax;
-
-		xax.l.eax = 0;
-
-		xax.w.ax = 16384 * 1;
-		xax.l.eax &= 0x0000ffff;
-		xax.l.eax += addr;
-		xax.l.eax <<= 8;
-		xax.b.al = val;
-
-		data = xax.l.eax;
+	switch (program_cmd_idx) {
+	case 0:
+		program_cmd_idx += (addr == 0x555 && val == 0xaa) ? 1 : 0;
+		break;
+	case 1:
+		program_cmd_idx += (addr == 0x2aa && val == 0x55) ? 1 : 0;
+		break;
+	case 2:
+		program_cmd_idx += (addr == 0x555 && val == 0xa0) ? 1 : 0;
+		break;
+	case 3:
+		offset = 0;
+		base = rom_base_addr;
+		/* fall through */
+	default:
+		program_cmd_idx = 0;
 	}
 
-
-	//if (iaddr == 0x555 || iaddr == 0x2aa)
-	//	printf("writeb: %04x := %02x (out=%08x)\n", (unsigned)addr, val, data);
+	uint32_t data = ((offset & 0xffff) + base + addr) << 8 | val;
 
 	OUTL(data, io_base_addr + bios_rom_addr);
-	last_write_addr = addr;
 }
 
 static uint8_t atapromise_chip_readb(const struct flashctx *flash,
 				  const chipaddr addr)
 {
-	return ((uint8_t*)phys)[addr];
+	return ((volatile uint8_t*)phys)[addr];
 }
 
 #else
