@@ -39,12 +39,13 @@ static uint32_t rom_base_addr = 0;
 static uint32_t bios_rom_addr = 0;
 static uint32_t bios_rom_data = 0;
 
-static int memfd = -1;
+static void *phys = NULL;
+static size_t maplen = 0;
 
 const struct dev_entry ata_promise[] = {
-	/* Promise PDC20267 (FastTrak100/Ultra100) */
+	{0x105a, 0x4d38, NT, "Promise", "PDC20262 (FastTrak66/Ultra66)"},
+	{0x105a, 0x0d30, NT, "Promise", "PDC20265 (FastTrak100 Lite/Ultra100)"},
 	{0x105a, 0x4d30, OK, "Promise", "PDC20267 (FastTrak100/Ultra100)"},
-
 	{0},
 };
 
@@ -67,8 +68,11 @@ static int atapromise_shutdown(void *data)
 {
 	printf("\n%s\n", __func__);
 
-	if (memfd >= 0)
-		close(memfd);
+	if (phys) {
+		physunmap(phys, maplen);
+		phys = NULL;
+		maplen = 0;
+	}
 
 	return 0;
 }
@@ -84,7 +88,7 @@ int atapromise_init(void)
 	if (!dev)
 		return 1;
 
-	io_base_addr = pcidev_readbar(dev, PCI_BASE_ADDRESS_4);
+	io_base_addr = pcidev_readbar(dev, PCI_BASE_ADDRESS_4) & 0xfffe;
 	if (!io_base_addr)
 		return 1;
 
@@ -95,22 +99,22 @@ int atapromise_init(void)
 	if (register_shutdown(atapromise_shutdown, NULL))
 		return 1;
 
-	memfd = open("/dev/mem", O_RDWR | O_SYNC);
-	if (memfd < 0) {
-		perror("open");
+	maplen = dev->rom_size;
+	phys = physmap_ro("ROM", rom_base_addr, maplen);
+	if (phys == ERROR_PTR) {
 		return 1;
 	}
-
-	io_base_addr &= 0xfffe;
 
 	switch (dev->device_id) {
 	case 0x4d30:
 	case 0x4d38:
 	case 0x0d30:
-	default:
 		bios_rom_addr = 0x14;
 		bios_rom_data = 0;
 		break;
+	default:
+		msg_perr("Unsupported device %04x\n", dev->device_id);
+		return 1;
 	}
 
 	OUTB(1, io_base_addr + 0x10);
@@ -119,8 +123,6 @@ int atapromise_init(void)
 
 	return 0;
 }
-
-int silicon_id_cmd_byte = 0;
 
 static chipaddr last_write_addr = 0;
 
@@ -180,34 +182,7 @@ static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 static uint8_t atapromise_chip_readb(const struct flashctx *flash,
 				  const chipaddr addr)
 {
-	//printf("readb: %04x => ", (unsigned)addr);
-
-	uint8_t val;
-
-	if (silicon_id_cmd_byte != 3 || true) {
-#if 1
-		off_t offset = rom_base_addr + addr;
-		if (lseek(memfd, offset, SEEK_SET) == (off_t)-1) {
-			perror("lseek");
-			val = 0xff;
-		} else {
-			if (read(memfd, &val, 1) != 1) {
-				perror("read");
-				val = 0xff;
-			}
-		}
-		//val = mmio_readb(mem + addr);
-#else
-		val = INB(rom_base_addr + (uint32_t)addr);
-#endif
-	} else {
-		//printf("(fake) ");
-		val = addr ? 0x18 : 0xc2;
-	}
-
-	//printf("%02x\n", val);
-
-	return val;
+	return ((uint8_t*)phys)[addr];
 }
 
 #else
