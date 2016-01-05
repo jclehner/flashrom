@@ -47,13 +47,10 @@ static uint32_t io_base_addr = 0;
 static uint32_t rom_base_addr = 0;
 //static uint32_t rom_addr = 0;
 
-static uint32_t bios_rom_addr = 0;
-static uint32_t bios_rom_data = 0;
+static uint32_t bios_rom_addr_data = 0;
 
 static void *phys = NULL;
 static size_t maplen = 0;
-
-static unsigned w_offset = 0;
 
 const struct dev_entry ata_promise[] = {
 	{0x105a, 0x4d38, NT, "Promise", "PDC20262 (FastTrak66/Ultra66)"},
@@ -66,6 +63,7 @@ static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 				chipaddr addr);
 static uint8_t atapromise_chip_readb(const struct flashctx *flash,
 		const chipaddr addr);
+
 static const struct par_master par_master_atapromise = {
 		.chip_readb		= atapromise_chip_readb,
 		.chip_readw		= fallback_chip_readw,
@@ -123,7 +121,7 @@ int atapromise_init(void)
 		maplen = romaddr & 0x10000 ? 128 : 64;
 	}
 
-	msg_pdbg("ROM size is %zu kB (reg=0x%08x)\n", maplen, (unsigned)romaddr);
+	msg_pdbg("ROM size is %zu kB (reg=0x%08" PRIx32 ")\n", maplen, romaddr);
 
 	maplen *= 1024;
 	phys = physmap_ro("Promise BIOS", rom_base_addr, maplen);
@@ -138,8 +136,7 @@ int atapromise_init(void)
 	case 0x4d30:
 	case 0x4d38:
 	case 0x0d30:
-		bios_rom_addr = 0x14;
-		bios_rom_data = 0;
+		bios_rom_addr_data = 0x14;
 		break;
 	default:
 		msg_perr("Unsupported device %04x\n", dev->device_id);
@@ -151,13 +148,15 @@ int atapromise_init(void)
 	return 0;
 }
 
-static unsigned program_cmd_idx = 0;
 
 static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 				chipaddr addr)
 {
 	uint32_t base = 0;
 	uint32_t offset = 0;
+
+#if 0
+	static unsigned int program_cmd_idx = 0;
 
 	switch (program_cmd_idx) {
 	case 0:
@@ -176,10 +175,11 @@ static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 	default:
 		program_cmd_idx = 0;
 	}
+#endif
 
 	uint32_t data = ((offset & 0xffff) + base + addr) << 8 | val;
 
-	OUTL(data, io_base_addr + bios_rom_addr);
+	OUTL(data, io_base_addr + bios_rom_addr_data);
 }
 
 static uint8_t atapromise_chip_readb(const struct flashctx *flash,
