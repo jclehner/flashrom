@@ -153,8 +153,9 @@ int atapromise_init(void)
 static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 				chipaddr addr)
 {
-	uint32_t data = addr << 8 | val;
-	bool wait = false;
+	bool is_data = false;
+	uint32_t data = (addr & 0xfff) << 8 | val;
+	data |= (rom_base_addr + ((uint32_t)addr / 0x1000) << 4) << 8;
 
 #if 1
 	static unsigned int program_cmd_idx = 0;
@@ -170,22 +171,7 @@ static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 		program_cmd_idx += (addr == 0x555 && val == 0xa0) ? 1 : 0;
 		break;
 	case 3:
-		// 0x4000 --> first 2 bytes, every 8 bytes
-		// 0x8000 --> first byte, every 4 bytes
-
-		// this writes the first 8 bytes of every 16 bytes 
-		//data |= (rom_base_addr + (uint32_t)addr / 0x1000) << 8;
-		// this writes the first 2 bytes of every 16 bytes
-		data |= (rom_base_addr + (uint32_t)addr / 0x1000) << 8;
-		//data |= (rom_base_addr + (((uint32_t)addr / 0x10000) & 0xfffff)) << 8;
-		//data |= rom_base_addr << 8;
-		//data &= 0xffff00ff;
-
-		wait = true;
-#if 0
-		msg_pdbg("data: %05x := %02x (%08x)\n", (unsigned)addr & 0xfffff,
-				val & 0xff, (unsigned)data);
-#endif
+		is_data = true;
 		/* fall through */
 	default:
 		program_cmd_idx = 0;
@@ -194,12 +180,10 @@ static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 
 	OUTL(data, io_base_addr + bios_rom_addr_data);
 
-	//programmer_delay(10);
-
-	(void) wait;
 #if 1
-	if (wait) {
-		mmio_writeb(val, phys + addr);
+	if (is_data) {
+		msg_pdbg("data: %05x := %02x (%08x)\n", (unsigned)addr & 0xfffff,
+				val & 0xff, (unsigned)data);
 	}
 #endif
 }
