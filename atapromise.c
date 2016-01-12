@@ -27,8 +27,8 @@
 #include "hwaccess.h"
 
 #define PCI_VENDOR_ID_PROMISE	0x105a
-#define PROMISE_MAX_ROM_DECODE (32 * 1024)
-#define PROMISE_ADDR_MASK (PROMISE_MAX_ROM_DECODE - 1)
+#define MAX_ROM_DECODE (32 * 1024)
+#define ADDR_MASK (MAX_ROM_DECODE - 1)
 
 /**
  * This programmer was created by reverse-engineering Promise's DOS-only
@@ -43,10 +43,8 @@
 static uint32_t io_base_addr = 0;
 static uint32_t rom_base_addr = 0;
 
-static uint32_t bios_rom_addr_data = 0;
-
 static uint8_t *atapromise_bar = NULL;
-static size_t maplen = 0;
+static size_t rom_size = 0;
 
 const struct dev_entry ata_promise[] = {
 	{0x105a, 0x4d38, NT, "Promise", "PDC20262 (FastTrak66/Ultra66)"},
@@ -189,7 +187,7 @@ static void atapromise_chip_fixup(struct flashchip *chip)
 		return;
 	
 	size = chip->total_size * 1024;
-	if (size > PROMISE_MAX_ROM_DECODE)
+	if (size > rom_size)
 	{
 		/* Remove all block_erasers that operate on sectors, and adjust
 		 * the eraseblock size of the block_eraser that erases the whole
@@ -197,18 +195,18 @@ static void atapromise_chip_fixup(struct flashchip *chip)
 		 */
 		for (i = 0; i < NUM_ERASEFUNCTIONS; ++i) {
 			if (chip->block_erasers[i].eraseblocks[0].size != size) {
+				chip->block_erasers[i].eraseblocks[0].count = 0;
 				chip->block_erasers[i].block_erase = NULL;
 			} else {
-				chip->block_erasers[i].eraseblocks[0].size = 
-					PROMISE_MAX_ROM_DECODE;
+				chip->block_erasers[i].eraseblocks[0].size = rom_size;
 				break;
 			}
 		}
 
 		if (i != NUM_ERASEFUNCTIONS) {
-			chip->total_size = PROMISE_MAX_ROM_DECODE / 1024;
-			if (chip->page_size > PROMISE_MAX_ROM_DECODE)
-				chip->page_size = PROMISE_MAX_ROM_DECODE;
+			chip->total_size = rom_size / 1024;
+			if (chip->page_size > rom_size)
+				chip->page_size = rom_size;
 		} else {
 			msg_pwarn("Failed to adjust size of chip \"%s\" (%d kB).\n",
 					chip->name, chip->total_size);
@@ -248,30 +246,19 @@ int atapromise_init(void)
 		return 1;
 	}
 
-	maplen = dev->rom_size;
+	rom_size = dev->rom_size;
 
-	msg_pdbg("ROM size reported as %zu kB.\n", maplen / 1024);
-	if (maplen > PROMISE_MAX_ROM_DECODE) {
-		maplen = PROMISE_MAX_ROM_DECODE;
+	msg_pdbg("ROM size reported as %zu kB.\n", rom_size / 1024);
+	if (rom_size > MAX_ROM_DECODE) {
+		rom_size = MAX_ROM_DECODE;
 	}
 
-	atapromise_bar = (uint8_t*)rphysmap("Promise", rom_base_addr, maplen);
+	atapromise_bar = (uint8_t*)rphysmap("Promise", rom_base_addr, rom_size);
 	if (atapromise_bar == ERROR_PTR) {
 		return 1;
 	}
 
-	switch (dev->device_id) {
-	case 0x4d30:
-	case 0x4d38:
-	case 0x0d30:
-		bios_rom_addr_data = 0x14;
-		break;
-	default:
-		msg_perr("Unsupported device %04x\n", dev->device_id);
-		return 1;
-	}
-
-	max_rom_decode.parallel = PROMISE_MAX_ROM_DECODE;
+	max_rom_decode.parallel = rom_size;
 	register_par_master(&par_master_atapromise, BUS_PARALLEL);
 
 	return 0;
@@ -280,79 +267,18 @@ int atapromise_init(void)
 static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 				chipaddr addr)
 {
+	uint32_t data;
+
 	atapromise_chip_fixup(flash->chip);
-
-#if 0
-	flash->chip->total_size = maplen / 1024;
-#endif
-
-#if 0
-	uint32_t data = addr / 0x4000;
-	data &= 0xffff;
-	data += rom_base_addr;
-	data += addr;
-	
-	data <<= 8;
-	data |= val;
-#endif
-
-#if 0
-	// this works for the first 0x1000 bytes only
-	uint32_t data = addr << 8 | val;
-	data |= (rom_base_addr + (uint32_t)addr / 0x1000) << 8;
-	//data |= rom_base_addr /*+ (((uint32_t)addr / 0x1000) << 4)*/ << 8;
-#else
-	uint32_t data = (rom_base_addr + (addr & PROMISE_ADDR_MASK)) << 8 | val;
-#endif
-
-#if 1
-	static unsigned int program_cmd_idx = 0;
-	bool is_data = false;
-
-	switch (program_cmd_idx) {
-	case 0:
-		program_cmd_idx += (addr == 0x555 && val == 0xaa) ? 1 : 0;
-		break;
-	case 1:
-		program_cmd_idx += (addr == 0x2aa && val == 0x55) ? 1 : 0;
-		break;
-	case 2:
-		program_cmd_idx += (addr == 0x555 && val == 0xa0) ? 1 : 0;
-		break;
-	case 3:
-		is_data = true;
-		/* fall through */
-	default:
-		program_cmd_idx = 0;
-	}
-
-#endif
-
-	OUTL(data, io_base_addr + bios_rom_addr_data);
-
-#if 1
-	if (is_data /*&& addr && !(addr & 0xff)*/) {
-
-		unsigned int i = 30;
-
-		while (--i) {
-			if (atapromise_chip_readb(flash, addr) == val)
-				break;
-		}
-
-
-		msg_pdbg("data: %05x := %02x (%02x) (%08x) %u %s\n", (unsigned)addr & 0xfffff,
-				val & 0xff, atapromise_chip_readb(flash, addr) & 0xff,
-				(unsigned)data, i, i ? "" : "(error)");
-	}
-#endif
+	data = (rom_base_addr + (addr & ADDR_MASK)) << 8 | val;
+	OUTL(data, io_base_addr + 0x14);
 }
 
 static uint8_t atapromise_chip_readb(const struct flashctx *flash,
 				  const chipaddr addr)
 {
 	atapromise_chip_fixup(flash->chip);
-	return pci_mmio_readb(atapromise_bar + (addr & PROMISE_ADDR_MASK));
+	return pci_mmio_readb(atapromise_bar + (addr & ADDR_MASK));
 }
 
 #else
