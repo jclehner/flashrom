@@ -27,7 +27,8 @@
 #include "hwaccess.h"
 
 #define PCI_VENDOR_ID_PROMISE	0x105a
-#define PROMISE_ADDR_MASK 0x1ffff
+#define PROMISE_MAX_ROM_DECODE (32 * 1024)
+#define PROMISE_ADDR_MASK (PROMISE_MAX_ROM_DECODE - 1)
 
 /**
  * This programmer was created by reverse-engineering Promise's DOS-only
@@ -72,7 +73,6 @@ static const struct par_master par_master_atapromise = {
 
 void *atapromise_map(const char *descr, uintptr_t phys_addr, size_t len)
 {
-	msg_pdbg("\natapromise_map(\"%s\", %08zx, %zu", descr, phys_addr, len);
 	return NULL;
 }
 
@@ -169,13 +169,53 @@ static int atapromise_bridge_fixup(struct pci_dev *dev)
 			rpci_write_word(br, PCI_MEMORY_BASE, reg16);
 		}
 
-		if ((reg16 + 0x10) < pci_read_word(br, PCI_MEMORY_LIMIT)) {
+		reg16 += 0x20;
+
+		if (reg16 < pci_read_word(br, PCI_MEMORY_LIMIT)) {
 			msg_pdbg2("Adjusting memory limit of bridge.\n");
-			rpci_write_word(br, PCI_MEMORY_LIMIT, reg16 + 0x10);
+			rpci_write_word(br, PCI_MEMORY_LIMIT, reg16);
 		}
 	}
 
 	return 0;
+}
+
+static void atapromise_chip_fixup(struct flashchip *chip)
+{
+	static bool called = false;
+	unsigned int i, size;
+
+	if (called)
+		return;
+	
+	size = chip->total_size * 1024;
+	if (size > PROMISE_MAX_ROM_DECODE)
+	{
+		/* Remove all block_erasers that operate on sectors, and adjust
+		 * the eraseblock size of the block_eraser that erases the whole
+		 * chip.
+		 */
+		for (i = 0; i < NUM_ERASEFUNCTIONS; ++i) {
+			if (chip->block_erasers[i].eraseblocks[0].size != size) {
+				chip->block_erasers[i].block_erase = NULL;
+			} else {
+				chip->block_erasers[i].eraseblocks[0].size = 
+					PROMISE_MAX_ROM_DECODE;
+				break;
+			}
+		}
+
+		if (i != NUM_ERASEFUNCTIONS) {
+			chip->total_size = PROMISE_MAX_ROM_DECODE / 1024;
+			if (chip->page_size > PROMISE_MAX_ROM_DECODE)
+				chip->page_size = PROMISE_MAX_ROM_DECODE;
+		} else {
+			msg_pwarn("Failed to adjust size of chip \"%s\" (%d kB).\n",
+					chip->name, chip->total_size);
+		}
+	}
+
+	called = true;
 }
 
 int atapromise_init(void)
@@ -192,29 +232,14 @@ int atapromise_init(void)
 	if (atapromise_bridge_fixup(dev))
 		return 1;
 
-	uint32_t saved = pci_read_long(dev, 0x30);
-
-	rpci_write_word(dev, 0x30, 0xc000);
-	rpci_write_word(dev, 0x32, 3);
-	uint16_t reg16 = pci_read_word(dev, 0x30);
-	if (reg16 & 0xc000) {
-		maplen = 16;
-	} else {
-		reg16 = pci_read_word(dev, 0x32);
-		maplen = reg16 & 1 ? 64 : 128;
-	}
-
-	msg_pdbg("ROM size is %zu kB (reg=0x%08" PRIx32 ")\n", maplen, 
-			pci_read_long(dev, 0x30));
-	pci_write_long(dev, 0x30, saved);
-
 	io_base_addr = pcidev_readbar(dev, PCI_BASE_ADDRESS_4) & 0xfffe;
 	if (!io_base_addr) {
-		msg_pdbg("Failed to read BAR4");
 		return 1;
 	}
 
-	/* not exactly sure what this does, but ptiflash does it too */
+	/* Not exactly sure what this does, because flashing seems to work without
+	 * it. However, PTIFLASH does it, so we do it too.
+	 */
 	OUTB(1, io_base_addr + 0x10);
 
 	rom_base_addr = pcidev_readbar(dev, PCI_BASE_ADDRESS_5);
@@ -223,10 +248,14 @@ int atapromise_init(void)
 		return 1;
 	}
 
-	maplen = 128;
-	maplen *= 1024;
+	maplen = dev->rom_size;
 
-	atapromise_bar = (uint8_t*)rphysmap("Promise BIOS", rom_base_addr, maplen);
+	msg_pdbg("ROM size reported as %zu kB.\n", maplen / 1024);
+	if (maplen > PROMISE_MAX_ROM_DECODE) {
+		maplen = PROMISE_MAX_ROM_DECODE;
+	}
+
+	atapromise_bar = (uint8_t*)rphysmap("Promise", rom_base_addr, maplen);
 	if (atapromise_bar == ERROR_PTR) {
 		return 1;
 	}
@@ -242,23 +271,16 @@ int atapromise_init(void)
 		return 1;
 	}
 
-	//max_rom_decode.parallel = maplen;
+	max_rom_decode.parallel = PROMISE_MAX_ROM_DECODE;
 	register_par_master(&par_master_atapromise, BUS_PARALLEL);
 
 	return 0;
 }
 
-static void atapromise_chip_fixup(const struct flashctx *flash)
-{
-	static bool fixed = false;
-	if (fixed || flash->chip->total_size == maplen)
-		return;
-}
-
 static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 				chipaddr addr)
 {
-	atapromise_chip_fixup(flash);
+	atapromise_chip_fixup(flash->chip);
 
 #if 0
 	flash->chip->total_size = maplen / 1024;
@@ -323,19 +345,13 @@ static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 				val & 0xff, atapromise_chip_readb(flash, addr) & 0xff,
 				(unsigned)data, i, i ? "" : "(error)");
 	}
-#if 0
-	
-	unsigned int i = 5000;
-	while (--i) {
-		OUTB(val, 0xEB);
-	}
-#endif
 #endif
 }
 
 static uint8_t atapromise_chip_readb(const struct flashctx *flash,
 				  const chipaddr addr)
 {
+	atapromise_chip_fixup(flash->chip);
 	return pci_mmio_readb(atapromise_bar + (addr & PROMISE_ADDR_MASK));
 }
 
