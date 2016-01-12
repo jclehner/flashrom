@@ -188,7 +188,7 @@ const struct programmer_entry programmer_table[] = {
 		.type			= PCI,
 		.devs.dev		= ata_promise,
 		.init			= atapromise_init,
-		.map_flash_region	= fallback_map,
+		.map_flash_region	= atapromise_map,
 		.unmap_flash_region	= fallback_unmap,
 		.delay			= internal_delay,
 	},

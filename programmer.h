@@ -466,6 +466,7 @@ extern const struct dev_entry ata_via[];
 /* atapromise.c */
 #if CONFIG_ATAPROMISE == 1
 int atapromise_init(void);
+void *atapromise_map(const char *descr, uintptr_t phys_addr, size_t len);
 extern const struct dev_entry ata_promise[];
 #endif
 
