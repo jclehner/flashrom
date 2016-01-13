@@ -37,13 +37,11 @@
  * programming the other 2026x controllers is the same, so it should,
  * in theory, work for those as well.
  *
- * This programmer is limited to the first 32 kB, which should be sufficient,
+ * This programmer is limited to 32 kB, which should be sufficient,
  * given that the ROM files for these controllers are 16 kB. Since flashrom
  * does not support flashing images smaller than the detected flash chip
  * (the tested Ultra100 uses a 128 kB MX29F001T chip), the chip size
  * is hackishly adjusted in atapromise_limit_chip.
- *
- * To flash 32 kB files, use "allow32k=y".
  */
 
 static uint32_t io_base_addr = 0;
@@ -168,21 +166,6 @@ static void atapromise_limit_chip(struct flashchip *chip)
 	last_model_id = chip->model_id;
 }
 
-static bool atapromise_allow32k()
-{
-	bool ret;
-	char *p;
-
-	p = extract_programmer_param("allow32k");
-	if (!p) {
-		return false;
-	}
-
-	ret = p[0] == '1' || p[0] == 'y' || p[0] == 'Y';
-	free(p);
-	return ret;
-}
-
 int atapromise_init(void)
 {
 	struct pci_dev *dev = NULL;
@@ -214,18 +197,7 @@ int atapromise_init(void)
 		return 1;
 	}
 
-	if (atapromise_allow32k()) {
-			if (dev->rom_size < (32 * 1024)) {
-				msg_perr("ROM size is reported as %zu kB. Cannot flash 32 kB "
-						"files.\n", dev->rom_size);
-				return 1;
-			}
-			rom_size = 32 * 1024;
-	} else {
-		/* Default to 16 kB, so we can flash unpadded images */
-		rom_size = 16 * 1024;
-	}
-
+	rom_size = dev->rom_size > MAX_ROM_DECODE ? MAX_ROM_DECODE : dev->rom_size;
 	atapromise_bar = (uint8_t*)rphysmap("Promise", rom_base_addr, rom_size);
 	if (atapromise_bar == ERROR_PTR) {
 		return 1;
