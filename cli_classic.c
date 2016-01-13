@@ -97,11 +97,11 @@ int main(int argc, char *argv[])
 	struct flashctx *fill_flash;
 	const char *name;
 	int namelen, opt, i, j;
-	int startchip = -1, chipcount = 0, option_index = 0, force = 0;
+	int startchip = -1, chipcount = 0, option_index = 0;
 #if CONFIG_PRINT_WIKI == 1
 	int list_supported_wiki = 0;
 #endif
-	int read_it = 0, write_it = 0, erase_it = 0, verify_it = 0;
+	enum ops ops = 0;
 	int dont_verify_it = 0, list_supported = 0, operation_specified = 0;
 	enum programmer prog = PROGRAMMER_INVALID;
 	int ret = 0;
@@ -155,7 +155,7 @@ int main(int argc, char *argv[])
 				cli_classic_abort_usage();
 			}
 			filename = strdup(optarg);
-			read_it = 1;
+			ops |= DOIT_OP_READ;
 			break;
 		case 'w':
 			if (++operation_specified > 1) {
@@ -164,7 +164,7 @@ int main(int argc, char *argv[])
 				cli_classic_abort_usage();
 			}
 			filename = strdup(optarg);
-			write_it = 1;
+			ops |= DOIT_OP_WRITE;
 			break;
 		case 'v':
 			//FIXME: gracefully handle superfluous -v
@@ -178,10 +178,10 @@ int main(int argc, char *argv[])
 				cli_classic_abort_usage();
 			}
 			filename = strdup(optarg);
-			verify_it = 1;
+			ops |= DOIT_OP_VERIFY;
 			break;
 		case 'n':
-			if (verify_it) {
+			if (ops & DOIT_OP_VERIFY) {
 				fprintf(stderr, "--verify and --noverify are mutually exclusive. Aborting.\n");
 				cli_classic_abort_usage();
 			}
@@ -201,10 +201,10 @@ int main(int argc, char *argv[])
 					"specified. Aborting.\n");
 				cli_classic_abort_usage();
 			}
-			erase_it = 1;
+			ops |= DOIT_OP_ERASE;
 			break;
 		case 'f':
-			force = 1;
+			ops |= DOIT_FLAG_FORCE;
 			break;
 		case 'l':
 			if (layoutfile) {
@@ -326,7 +326,7 @@ int main(int argc, char *argv[])
 		cli_classic_abort_usage();
 	}
 
-	if ((read_it | write_it | verify_it) && check_filename(filename, "image")) {
+	if (ops & DOIT_MASK_OP_RWV && check_filename(filename, "image")) {
 		cli_classic_abort_usage();
 	}
 	if (layoutfile && check_filename(layoutfile, "layout")) {
@@ -368,7 +368,7 @@ int main(int argc, char *argv[])
 		ret = 1;
 		goto out;
 	}
-	if (layoutfile != NULL && !write_it) {
+	if (layoutfile != NULL && !(ops & DOIT_OP_WRITE)) {
 		msg_gerr("Layout files are currently supported for write operations only.\n");
 		ret = 1;
 		goto out;
@@ -446,11 +446,11 @@ int main(int argc, char *argv[])
 		goto out_shutdown;
 	} else if (!chipcount) {
 		msg_cinfo("No EEPROM/flash device found.\n");
-		if (!force || !chip_to_probe) {
+		if (!(ops & DOIT_FLAG_FORCE) || !chip_to_probe) {
 			msg_cinfo("Note: flashrom can never write if the flash chip isn't found "
 				  "automatically.\n");
 		}
-		if (force && read_it && chip_to_probe) {
+		if ((ops & DOIT_FLAG_FORCE) && (ops & DOIT_OP_READ) && chip_to_probe) {
 			struct registered_master *mst;
 			int compatible_masters = 0;
 			msg_cinfo("Force read (-f -r -c) requested, pretending the chip is there:\n");
@@ -507,7 +507,7 @@ int main(int argc, char *argv[])
 	print_chip_support_status(fill_flash->chip);
 
 	unsigned int limitexceeded = count_max_decode_exceedings(fill_flash);
-	if (limitexceeded > 0 && !force) {
+	if (limitexceeded > 0 && !(ops & DOIT_FLAG_FORCE)) {
 		enum chipbustype commonbuses = fill_flash->mst->buses_supported & fill_flash->chip->bustype;
 
 		/* Sometimes chip and programmer have more than one bus in common,
@@ -522,14 +522,14 @@ int main(int argc, char *argv[])
 		goto out_shutdown;
 	}
 
-	if (!(read_it | write_it | verify_it | erase_it)) {
+	if (!(ops & DOIT_MASK_OP_ALL)) {
 		msg_ginfo("No operations were specified.\n");
 		goto out_shutdown;
 	}
 
 	/* Always verify write operations unless -n is used. */
-	if (write_it && !dont_verify_it)
-		verify_it = 1;
+	if (ops & DOIT_OP_WRITE && !dont_verify_it)
+		ops |= DOIT_OP_VERIFY;
 
 	/* Map the selected flash chip again. */
 	if (map_flash(fill_flash) != 0) {
@@ -542,7 +542,7 @@ int main(int argc, char *argv[])
 	 * Give the chip time to settle.
 	 */
 	programmer_delay(100000);
-	ret |= doit(fill_flash, force, filename, read_it, write_it, erase_it, verify_it);
+	ret |= doit(fill_flash, filename, ops);
 
 	unmap_flash(fill_flash);
 out_shutdown:

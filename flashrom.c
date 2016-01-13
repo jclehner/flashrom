@@ -1879,13 +1879,14 @@ int selfcheck(void)
 	return ret;
 }
 
-/* FIXME: This function signature needs to be improved once doit() has a better
- * function signature.
- */
-int chip_safety_check(const struct flashctx *flash, int force, int read_it, int write_it, int erase_it,
-		      int verify_it)
+int chip_safety_check(const struct flashctx *flash, enum ops ops)
 {
 	const struct flashchip *chip = flash->chip;
+	int force = ops & DOIT_FLAG_FORCE;
+	int read_it = ops & DOIT_OP_READ;
+	int write_it = ops & DOIT_OP_WRITE;
+	int erase_it = ops & DOIT_OP_ERASE;
+	int verify_it = ops & DOIT_OP_VERIFY;
 
 	if (!programmer_may_write && (write_it || erase_it)) {
 		msg_perr("Write/erase is not working yet on your programmer in "
@@ -1954,16 +1955,19 @@ int chip_safety_check(const struct flashctx *flash, int force, int read_it, int 
  * but right now it allows us to split off the CLI code.
  * Besides that, the function itself is a textbook example of abysmal code flow.
  */
-int doit(struct flashctx *flash, int force, const char *filename, int read_it,
-	 int write_it, int erase_it, int verify_it)
+int doit(struct flashctx *flash, const char *filename, enum ops ops)
 {
 	uint8_t *oldcontents;
 	uint8_t *newcontents;
 	int ret = 0;
 	unsigned long size = flash->chip->total_size * 1024;
+	int read_it = ops & DOIT_OP_READ;
+	int write_it = ops & DOIT_OP_WRITE;
+	int erase_it = ops & DOIT_OP_ERASE;
+	int verify_it = ops & DOIT_OP_VERIFY;
 	int read_all_first = 1; /* FIXME: Make this configurable. */
 
-	if (chip_safety_check(flash, force, read_it, write_it, erase_it, verify_it)) {
+	if (chip_safety_check(flash, ops)) {
 		msg_cerr("Aborting.\n");
 		return 1;
 	}

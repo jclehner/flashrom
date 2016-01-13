@@ -281,9 +281,22 @@ void print_buildinfo(void);
 void print_banner(void);
 void list_programmers_linebreak(int startcol, int cols, int paren);
 int selfcheck(void);
-int doit(struct flashctx *flash, int force, const char *filename, int read_it, int write_it, int erase_it, int verify_it);
 int read_buf_from_file(unsigned char *buf, unsigned long size, const char *filename);
 int write_buf_to_file(const unsigned char *buf, unsigned long size, const char *filename);
+enum ops {
+	DOIT_OP_READ             = 1 << 0,
+	DOIT_OP_WRITE            = 1 << 1,
+	DOIT_OP_ERASE            = 1 << 2,
+	DOIT_OP_VERIFY           = 1 << 3,
+
+	DOIT_FLAG_FORCE          = 1 << 4,
+	/* TODO: actually use this */
+	DOIT_FLAG_READ_ALL_FIRST = 1 << 5,
+
+	DOIT_MASK_OP_RWV = DOIT_OP_READ | DOIT_OP_WRITE | DOIT_OP_VERIFY,
+	DOIT_MASK_OP_ALL = DOIT_MASK_OP_RWV | DOIT_OP_VERIFY
+};
+int doit(struct flashctx *flash, const char *filename, enum ops ops);
 
 /* Something happened that shouldn't happen, but we can go on. */
 #define ERROR_NONFATAL 0x100
