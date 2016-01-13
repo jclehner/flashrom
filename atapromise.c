@@ -79,56 +79,6 @@ void *atapromise_map(const char *descr, uintptr_t phys_addr, size_t len)
 	return NULL;
 }
 
-static struct pci_dev *atapromise_find_bridge(struct pci_dev *dev)
-{
-	struct pci_dev *br;
-	uint8_t bus_sec, bus_sub, htype;
-
-	for (br = dev->access->devices; br; br = br->next) {
-		/* Don't use br->hdrtype here! */
-		htype = pci_read_byte(br, PCI_HEADER_TYPE) & 0x7f;
-		if (htype != PCI_HEADER_TYPE_BRIDGE)
-			continue;
-
-		bus_sec = pci_read_byte(br, PCI_SECONDARY_BUS);
-		bus_sub = pci_read_byte(br, PCI_SUBORDINATE_BUS);
-
-		if (dev->bus >= bus_sec && dev->bus <= bus_sub) {
-			msg_pdbg("Device is behind bridge %04x:%04x, BDF %02x:%02x.%x.\n",
-					br->vendor_id, br->device_id, br->bus, br->dev, br->func);
-			return br;
-		}
-	}
-
-	return NULL;
-}
-
-static int atapromise_fixup_bridge(struct pci_dev *dev)
-{
-	struct pci_dev *br;
-	uint16_t reg16;
-
-	/* TODO: What about chained bridges? */
-	br = atapromise_find_bridge(dev);
-	if (br) {
-		/* Make sure that the bridge memory windows are set correctly. */
-		reg16 = pci_read_word(dev, PCI_BASE_ADDRESS_5 + 2) & 0xfff0;
-		if (reg16 < pci_read_word(br, PCI_MEMORY_BASE)) {
-			msg_pdbg("Adjusting memory base of bridge to %04x.\n", reg16);
-			rpci_write_word(br, PCI_MEMORY_BASE, reg16);
-		}
-
-		reg16 += (MAX_ROM_DECODE / 1024);
-
-		if (reg16 < pci_read_word(br, PCI_MEMORY_LIMIT)) {
-			msg_pdbg("Adjusting memory limit of bridge to %04x.\n", reg16);
-			rpci_write_word(br, PCI_MEMORY_LIMIT, reg16);
-		}
-	}
-
-	return 0;
-}
-
 static void atapromise_limit_chip(struct flashchip *chip)
 {
 	static uint32_t last_model_id = 0;
@@ -176,9 +126,6 @@ int atapromise_init(void)
 
 	dev = pcidev_init(ata_promise, PCI_BASE_ADDRESS_4);
 	if (!dev)
-		return 1;
-
-	if (atapromise_fixup_bridge(dev))
 		return 1;
 
 	io_base_addr = pcidev_readbar(dev, PCI_BASE_ADDRESS_4) & 0xfffe;
