@@ -133,10 +133,10 @@ static int atapromise_fixup_bridge(struct pci_dev *dev)
 
 static void atapromise_fixup_chip(struct flashchip *chip)
 {
-	static bool once = false;
+	static uint32_t last_model_id = 0;
 	unsigned int i, size;
 
-	if (once)
+	if (chip->model_id == last_model_id)
 		return;
 
 	size = chip->total_size * 1024;
@@ -165,7 +165,7 @@ static void atapromise_fixup_chip(struct flashchip *chip)
 		}
 	}
 
-	once = true;
+	last_model_id = chip->model_id;
 }
 
 static bool atapromise_allow32k()
