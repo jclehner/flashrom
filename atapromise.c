@@ -37,10 +37,14 @@
  * programming the other 2026x controllers is the same, so it should,
  * in theory, work for those as well.
  *
- * This programmer is limited to 32 kB, which should be sufficient,
- * given that the ROM files for these controllers are 16 kB. Since flashrom
- * does not support flashing images smaller than the detected flash chip
- * (the tested Ultra100 uses a 128 kB MX29F001T chip), the chip size
+ * While the tested Ultra100 controller used a 128 kB MX29F001T chip, A16
+ * and A15 showed continuity to ground, thus limiting the the programmer on
+ * this card to 32 kB. Without other controllers to test this programmer on,
+ * this is currently a hard limit. Note that ROM files for these controllers
+ * are 16 kB only.
+ *
+ * Since flashrom does not support flashing images smaller than the detected
+ * flash chip (the tested Ultra100 uses a 128 kB MX29F001T chip), the chip size
  * is hackishly adjusted in atapromise_limit_chip.
  */
 
