@@ -158,7 +158,7 @@ static void atapromise_limit_chip(struct flashchip *chip)
 			if (chip->page_size > rom_size)
 				chip->page_size = rom_size;
 		} else {
-			msg_pwarn("Failed to adjust size of chip \"%s\" (%d kB).\n",
+			msg_pdbg("Failed to adjust size of chip \"%s\" (%d kB).\n",
 					chip->name, chip->total_size);
 		}
 	}
