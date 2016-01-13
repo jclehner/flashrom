@@ -41,7 +41,7 @@
  * given that the ROM files for these controllers are 16 kB. Since flashrom
  * does not support flashing images smaller than the detected flash chip
  * (the tested Ultra100 uses a 128 kB MX29F001T chip), the chip size
- * is hackishly adjusted in atapromise_fixup_chip.
+ * is hackishly adjusted in atapromise_limit_chip.
  *
  * To flash 32 kB files, use "allow32k=y".
  */
@@ -131,7 +131,7 @@ static int atapromise_fixup_bridge(struct pci_dev *dev)
 	return 0;
 }
 
-static void atapromise_fixup_chip(struct flashchip *chip)
+static void atapromise_limit_chip(struct flashchip *chip)
 {
 	static uint32_t last_model_id = 0;
 	unsigned int i, size;
@@ -242,7 +242,7 @@ static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 {
 	uint32_t data;
 
-	atapromise_fixup_chip(flash->chip);
+	atapromise_limit_chip(flash->chip);
 	data = (rom_base_addr + (addr & ADDR_MASK)) << 8 | val;
 	OUTL(data, io_base_addr + 0x14);
 }
@@ -250,7 +250,7 @@ static void atapromise_chip_writeb(const struct flashctx *flash, uint8_t val,
 static uint8_t atapromise_chip_readb(const struct flashctx *flash,
 				  const chipaddr addr)
 {
-	atapromise_fixup_chip(flash->chip);
+	atapromise_limit_chip(flash->chip);
 	return pci_mmio_readb(atapromise_bar + (addr & ADDR_MASK));
 }
 
