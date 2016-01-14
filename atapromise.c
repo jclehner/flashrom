@@ -123,7 +123,6 @@ static void atapromise_limit_chip(struct flashchip *chip)
 int atapromise_init(void)
 {
 	struct pci_dev *dev = NULL;
-	char *param_32k = NULL;
 
 	if (rget_io_perms())
 		return 1;
