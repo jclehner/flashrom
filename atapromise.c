@@ -44,8 +44,8 @@
  * are 16 kB only.
  *
  * Since flashrom does not support flashing images smaller than the detected
- * flash chip (the tested Ultra100 uses a 128 kB MX29F001T chip), the chip size
- * is hackishly adjusted in atapromise_limit_chip.
+ * flash chip (the tested Ultra100 uses a 128 kB MX29F001T chip), the chip
+ * size is hackishly adjusted in atapromise_limit_chip.
  */
 
 static uint32_t io_base_addr = 0;
