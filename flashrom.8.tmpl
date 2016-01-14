@@ -194,6 +194,8 @@ cards)"
 .sp
 .BR "* atavia" " (for flash ROMs on VIA VT6421A SATA controllers)"
 .sp
+.BR "* atapromise" " (for flash ROMs on Promise PDC2026x ATA/RAID controllers)"
+.sp
 .BR "* it8212" " (for flash ROMs on ITE IT8212F ATA/RAID controller)"
 .sp
 .BR "* ft2232_spi" " (for SPI flash ROMs attached to an FT2232/FT4232H/FT232H family \
@@ -629,6 +631,12 @@ will be interpreted as usual (leading 0x (0) for hexadecimal (octal) values, or 
 For more information please see
 .nh
 .B http://flashrom.org/VT6421A
+.SS
+.BR "atapromise " programmer
+This programmer is currently limited to 32 kB, regardless of the actual size of the flash chip. This stems
+from the fact that, on the tested device (a Promise Ultra100), not all of the chip's address lines were
+actually connected. You may use this programmer to flash firmware updates, since these are only 16 kB in
+size (padding to 32 kB is required).
 .SS
 .BR "nicintel_eeprom " programmer
 This is the first programmer module in flashrom that does not provide access to NOR flash chips but EEPROMs
