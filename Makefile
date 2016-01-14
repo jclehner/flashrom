@@ -445,7 +445,7 @@ CONFIG_ATAHPT ?= no
 CONFIG_ATAVIA ?= yes
 
 # Promise ATA controller support.
-CONFIG_ATAPROMISE ?= yes
+CONFIG_ATAPROMISE ?= no
 
 # Always enable FT2232 SPI dongles for now.
 CONFIG_FT2232_SPI ?= yes
